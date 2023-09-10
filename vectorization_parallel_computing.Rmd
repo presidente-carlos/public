@@ -1,0 +1,280 @@
+---
+title: "Vectorization and Parallel Computing in R"
+author: "Carlos Gonzalez"
+date: "2023-09-10"
+output: pdf_document
+---
+```{r, message=FALSE}
+# Libraries
+library(dplyr)
+library(tictoc)
+```
+
+This entry focuses on two data objects in R: vectors and lists.
+Vectors are collections of *same type* elements, while lists are collections of *any* type of elements, including, possibly, vectors and other lists.
+
+Vectorization is one of the most powerful techniques in R (and many other programming languages). In a nutshell, there are two ways a computer can deal with a sequence of operations: sequentially (including multithreading, this is one at a time) or in parallel (many at the same time).
+
+Vectorization refers to the parallel application of the *same function* to a collection of elements stored in a data object (like a vector or a list!). Let's build some data objects, introduce the concept of vectorization and compare it to sequential application of functions.
+
+## Vectorization
+
+```{r}
+string_vector = c("cat", "dog", "fish")
+integer_vector = 1:1000
+mixed_vector = c("hello", 3, "house", 20)
+
+# What would happen to the integer elements in mixed_vector?
+# Can you run mixed_vector[2] + 3?
+# Vectors can only store objects of a single type logic < numeric* < string
+```
+
+Some functions in R interact quite successfully with vectors, and they do exactly what we would expect them to do.
+
+```{r}
+double_vector = integer_vector ^ 2 # Yes, arithmetic operators are functions!
+head(double_vector)
+paste0("My favorite animal is a ", string_vector)
+```
+But others, including many of the complicated functions that you will build, might find it difficult...
+
+```{r}
+colors = c("red", "blue", "green")
+n_balls = c(1, 3, 5)
+```
+
+
+```{r, eval=FALSE}
+sample(colors, size = n_balls, replace = T)
+```
+
+Ideally, we would have wanted the following to happen,
+
+```{r}
+sample(colors, size = n_balls[1], replace = T)
+sample(colors, size = n_balls[2], replace = T)
+sample(colors, size = n_balls[3], replace = T)
+```
+So, how can we achieve this sequential application of the function `sample` to each of the elements in a vector? You are probably already very familiar with the concept of loops.
+
+```{r}
+n_balls = 1:5
+for (n in n_balls){
+  print(sample(colors, size = n, replace = T))
+}
+```
+And sure, it works, but this is probably not the way to go... Why? Well, a (for) loop is just a sequential application of a function. This means that until the for loop is not done with the first iteration `sample(colors, size = n_balls[1], replace = T)`, it will not call the next one `sample(colors, size = n_balls[2], replace = T)`. Let's take a look at the time of this step for a larger vector of `n_balls`.
+
+```{r, echo = FALSE, results="hide"}
+n_balls = rep(1, 10000)
+tic()
+for (n in n_balls){
+  print(sample(colors, size = n, replace = T))
+}
+toc()
+```
+
+Wow, that took a long time didn't it? In fact, there are a couple of details that we should understand. (i) The result of the second iteration should be independent from the result in the first iteration, hence why should we wait for the first iteration to be done, before computing the second one? (ii) This function is actually very simple in computational terms, so our devices should certainly have the ability to compute both at "the same time". Is there any way of passing a vectorial argument to the function `sample` at the same time? This is where *vectorization* comes in,
+
+```{r}
+tic()
+sapply(n_balls, sample, x = colors, replace = T)
+toc()
+```
+
+That was a big time save, with just one line of code!! This is the power of vectorization!! Before diving a bit deeper into the secrets of vectorization, let's explore briefly the concept of lists in R.
+
+```{r}
+mixed_list = list("hello", c(2:10), matrix(1:9, nrow = 3, ncol = 3, byrow = T))
+mixed_list[[1]] # Double brackets [[]] to unlist elements in lists
+mixed_list[[2]]
+mixed_list[[3]]
+
+vector_list = list(sample(colors, size = 5, replace = T),
+                   sample(colors, size = 5, replace = T),
+                   sample(colors, size = 5, replace = T)) # This looks suspicious...
+vector_list
+
+tibble_list = list("students" = tibble(id = 1:2, 
+                          names = c("carlos", "brooklyn")),
+                   "profs" = tibble(id = 3:4,
+                          names = c("max", "frank"))) # Yes, this could certainly be a single tibble with a variable as the role of the observation
+tibble_list
+```
+
+Now we are in a position to explain the main vectorization tools within R
+
+```{r}
+# apply (especially useful for matrices)
+# it applies a function to a MARGIN dimension of a matrix/array
+# MARGIN = 1 for rows, MARGIN = 2 for columns
+
+apply(mixed_list[[3]], MARGIN = 1, mean)
+apply(mixed_list[[3]], MARGIN = 2, mean)
+```
+
+
+```{r}
+# lapply (especially useful for lists)
+# it applies a function to each of the elements in a vector/list
+# con: it always returns a list
+# pro: it always returns a list
+# tip: many times you'll need to unlist() the results after lapplying
+
+lapply(integer_vector, sqrt)
+lapply(integer_vector, sqrt) |> unlist()
+lapply(vector_list, table)
+lapply(vector_list, table, dnn = "My Colors") # Further arguments to be
+                                              # passed to the function
+```
+
+```{r}
+# sapply (especially useful for vectors)
+# it's a wrap-up of lapply (it "unlists"/simplifies) whenever possible
+# it used to be a personal favourite of mine
+# but I start to see the benefits of lists...
+
+sapply(integer_vector, sqrt)  # Returns a vector straightaway
+sapply(vector_list, table)  # Returns a tibble if all tables have the same elements
+
+```
+
+
+```{r}
+# mapply allows you to vectorize across two (or more) arguments of a function
+# tip: you will most likely need to expand.grid the mapplied vectors first
+
+id_vector = 1:3
+role_vector = c("student", "prof", "staff")
+
+vector_grid = expand.grid("id" = id_vector, "role" = role_vector)
+
+mapply(vector_grid$role, vector_grid$id, FUN = paste,
+       MoreArgs = list(sep = "_")) # Additional arguments need to be passed as list
+```
+Define as you go functions (similar to Python lambda functions)
+
+```{r}
+apply(mixed_list[[3]], MARGIN = 1, function(matrix_row){
+      mean(matrix_row) + 2})
+
+# In fact {} are not needed, and most people don't use them
+apply(mixed_list[[3]], MARGIN = 1, function(matrix_row)
+      mean(matrix_row) + 2)
+
+# You will sometimes see flashy people replacing function by \
+apply(mixed_list[[3]], MARGIN = 1, \(matrix_row)
+      mean(matrix_row) + 2)
+```
+The `purrr` package is a very common and very powerful vectorization package in R, beloging to the `tidyverse` universe. It has its own especial functions, but syntax is very similar to that of `baseR`
+
+```{r}
+# purrr map is equivalent to baseR lapply
+library(purrr)
+map(integer_vector, sqrt)
+
+# purrr pmap is equivalent to baseR mapply, etc.
+```
+
+One of the best vectorization features of `purrr` functions is that it can automatically coerce the outcome to the desired object type (or die trying, yes, that's what the documentation literally says)
+
+```{r}
+map_dbl(integer_vector, sqrt) # No need to unlist anymore
+```
+
+
+## Vectorization Exercises
+
+1. Create a matrix 100 $\times$ 100 of normal draws using `rnorm()` and `sapply`. Each row $i$ should have $\mu_i = - 4 + 8i / 100$ and $\sigma_i = 1$ 
+2. Compute the row mean and row standard deviation. Plot $\mu_i$ vs $\bar{x}_i$, and $\sigma_i$ to $\hat{\sigma}_i$.
+3. Create a list which contains 10 such matrices. Use the function `lapply`. The function `replicate` would also be a valid (in fact cleaner) option.
+4. Compute the row mean of each of those matrices in a single line of code
+
+```{r}
+# Solutions
+# 1.
+n_draws = 100
+mu = seq(from = -4, to = 4, length.out = 100)
+x = sapply(X = mu, FUN = rnorm, n = n_draws, sd = 1) |> t()
+
+# 2.
+row_mean = apply(x, MARGIN = 1, FUN = mean)
+row_sd = apply(x, MARGIN = 1, FUN = sd)
+
+plot(mu, row_mean)
+plot(rep(1, 100), row_sd)
+
+# 3. 
+x_list = lapply(rep(n_draws, 10), function(n_draws)
+         sapply(X = mu, FUN = rnorm, n = n_draws, sd = 1) |> t())
+
+# 4.
+row_means = lapply(x_list, function(x_list_elements)
+             apply(x_list_elements, MARGIN = 1, FUN = mean))
+```
+
+*Final note:* What are the *limitations to vectorization*? When is it actually a bad idea to use vectorization? 
+
+(a) Memory issues: If the mapping involves large memory consumption, then vectorization can gets us into trouble and memory demand will also increase
+(b) Super-fast tasks: Be aware that vectorization involves some previous steps before the parallel computation (like splitting the object, creating the sub-processes and recombining all the information at the end for display). If the process is very fast, vectorization can actually take longer than sequential application (although this is usually not the case).
+(c) Not-independent runs: If information needs to be transmitted across iterations, then our process might not be suitable for vectorization/parallel processing.
+
+## Parallel Computing
+
+What if I tell you that we can speed things up a bit more? Most modern devices, even cellphones, include multiple CPUS with various cores in each of them. This means that we can not only process each observation independently, but also to split every process into small subprocesses each of which will be processed in a different core/processing unit.
+
+Today, we will only explore multiprocessing (as opposed to `multicores`).
+
+There are many ways multiprocessing can be used in R. These include:
+1. The R built-in `parallel` library,
+2. The `purrr` syntax-based `furrr` library,
+3. The `baseR` syntax-based `future.apply`,
+4. and The for-loop multiprocessing package `foreach`.
+
+All of them are based in the notion of "futures". A future is an object whose evaluation is delayed when it is first created. This allows the user to create an object `mean_x = future({mean(x)})` and evaluate it some other time. This is very important because if we can evaluate it in the future, we can decide how do we want to evaluate it. For instance, we could evaluate it sequentially, but also in parallel across different cores (i.e. assume that x is a list of vectors, and that we would like to compute the mean for each of those vectors, so we can assign a few vectors to each of the computer's cores). 
+
+In fact, this is the same notion that our favourite vectorization tools like `apply` or `lapply` were using all this time in the background (this is known as hidden parallelization!).
+
+The extra step here is that we may not only parallelize within our processor unit, but split the task across processing units (and parallelize within each of them!). This is parallelization square!
+
+Parallelization is very simple in R because most of the work is done in the background. We just need to set the parallelization parameters (i.e. the number of cores) and run our preferred syntax. Here we only discuss `future.apply` and `furrr` syntax
+
+```{r}
+library(future)
+library(furrr)
+library(future.apply)
+
+plan(multisession, workers = 4)
+tic()
+hey = future_map(integer_vector, sqrt) # purrr based syntax
+toc()
+tic()
+ho = future_lapply(integer_vector, sqrt) # baseR based syntax
+toc()
+```
+A final interesting case is `replicate`. `replicate` allows us to call `n` times the same function, while allowing for some randomization in the process. It is then ideal for simulation and bootstraping.
+
+`replicate` operates just like the `apply` family functions, and, consequently `future.apply` includes a future-based alternative to `replicate`. Unfortunately, `furrr` does not provide us with a direct alternative, but if we really like their syntax, we can simply create a function with a ghost element and vectorize over it.
+
+```{r}
+replicate(10, rnorm(20)) # It conveniently returns a matrix where each row
+                         # is an iteration
+
+# Note that replicate can only be passed one functional argument, so all
+# additional arguments need to be passed within the function
+# this is unlike apply/lapply/sapply, where arguments were passed explicitly
+# and mapply, where additional arguments were rapped in a MoreArgs list object
+replicate(10, rnorm(20, mean = 2))
+
+# future.apply based
+future_replicate(100, rnorm(20, mean = 2))
+
+# furrr based
+future_map(1:10, function(i) rnorm(20, mean = 2))
+```
+
+## Exercises parallelization
+
+Repeat the same exercises than for vectorization but now `x` will be a 10,000 $\times$ 100 matrix, and the list will include 100 `x` like matrices. Optimize this code as much as possible using parallelization tools and the `replicate` function. No plotting is needed for this exercise.
+
+
