@@ -190,6 +190,29 @@ map_dbl(integer_vector, sqrt) # No need to unlist anymore
 3. Create a list which contains 10 such matrices. Use the function `lapply`. The function `replicate` would also be a valid (in fact cleaner) option.
 4. Compute the row mean of each of those matrices in a single line of code
 
+# Solutions
+```{r}
+# 1.
+n_draws = 100
+mu = seq(from = -4, to = 4, length.out = 100)
+x = sapply(X = mu, FUN = rnorm, n = n_draws, sd = 1) |> t()
+
+# 2.
+row_mean = apply(x, MARGIN = 1, FUN = mean)
+row_sd = apply(x, MARGIN = 1, FUN = sd)
+
+plot(mu, row_mean)
+plot(rep(1, 100), row_sd)
+
+# 3. 
+x_list = lapply(rep(n_draws, 10), function(n_draws)
+         sapply(X = mu, FUN = rnorm, n = n_draws, sd = 1) |> t())
+
+# 4.
+row_means = lapply(x_list, function(x_list_elements)
+             apply(x_list_elements, MARGIN = 1, FUN = mean))
+```
+
 *Final note:* What are the *limitations to vectorization*? When is it actually a bad idea to use vectorization? 
 
 (a) Memory issues: If the mapping involves large memory consumption, then vectorization can gets us into trouble and memory demand will also increase
